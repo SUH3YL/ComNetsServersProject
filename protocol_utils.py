@@ -1,20 +1,28 @@
 import struct
 import zlib
-from config import PacketType
+import random
+from config import PacketType, DEBUG_MODE, CORRUPTION_CHANCE
 
 # Paket Formatı (Network byte order - Big Endian):
-# ! - Big Endian
-# B - Packet Type (1 byte, unsigned char)
-# I - Sequence Number (4 bytes, unsigned int)
-# I - Checksum (4 bytes, unsigned int)
-# H - Payload Length (2 bytes, unsigned short)
-# Toplam Header Boyutu: 1 + 4 + 4 + 2 = 11 byte. 
-# Not: Kullanıcı config.py'de HEADER_SIZE=12 istemişti, bu yüzden 1 byte padding veya 
-# doğrudan 11 byte üzerinden devam edilebilir. İstek doğrultusunda 11 byte header + payload kullanacağız.
+# ... (önceki yorumlar)
 PACKET_FORMAT = "!BIIH"
 HEADER_SIZE_STRUCT = struct.calcsize(PACKET_FORMAT)
 
+def corrupt_data(data: bytes) -> bytes:
+    """
+    Veri içindeki rastgele bir baytı değiştirerek veriyi bozar (Bit-flip simulation).
+    """
+    if not data:
+        return data
+    
+    data_list = list(data)
+    # Rastgele bir index seç ve değerini değiştir (0-255 arası rastgele bir değerle XOR yap)
+    idx = random.randint(0, len(data_list) - 1)
+    data_list[idx] = data_list[idx] ^ 0xFF 
+    return bytes(data_list)
+
 def calculate_checksum(data: bytes) -> int:
+# ...
     """
     Verilen bayt verisi için CRC32 checksum hesaplar.
     """

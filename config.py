@@ -10,6 +10,10 @@ PORT_B = 5001
 TIMEOUT = 2.0
 MAX_RETRIES = 3
 
+# Debug ve Hata Simülasyonu
+DEBUG_MODE = False
+CORRUPTION_CHANCE = 0.3 # %30 ihtimalle paket bozulacak
+
 class PacketType(Enum):
    
     SYN = auto()
