@@ -6,6 +6,10 @@ BUFFER_SIZE = 1024
 PORT_A = 5000
 PORT_B = 5001
 
+# Retransmission Ayarları
+TIMEOUT = 2.0
+MAX_RETRIES = 3
+
 class PacketType(Enum):
    
     SYN = auto()
