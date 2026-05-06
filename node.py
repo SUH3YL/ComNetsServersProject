@@ -1,9 +1,14 @@
 import socket
 import random
 import threading
+from datetime import datetime
 from enum import Enum
+from colorama import init, Fore, Style
 from config import BUFFER_SIZE, PacketType, TIMEOUT, MAX_RETRIES, DEBUG_MODE, CORRUPTION_CHANCE
 from protocol_utils import pack_packet, unpack_packet, corrupt_data
+
+# Colorama'yı başlat
+init(autoreset=True)
 
 class NodeState(Enum):
     CLOSED = 0
@@ -26,7 +31,14 @@ class Node:
         self.sock.bind(self.my_address)
         self.sock.settimeout(TIMEOUT)
         self.state = NodeState.LISTEN
-        print(f"Node başlatıldı: {self.my_address} | Durum: {self.state.name}")
+        self.log(f"Node başlatıldı: {self.my_address} | Durum: {self.state.name}", Fore.CYAN)
+
+    def log(self, message, color=Fore.WHITE):
+        """
+        Zaman damgalı ve renkli log basar.
+        """
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        print(f"{Style.DIM}[{timestamp}]{Style.RESET_ALL} {color}{message}{Style.RESET_ALL}")
 
     def send_packet(self, p_type: PacketType, payload: bytes = b"", seq: int = None):
         """
@@ -40,12 +52,16 @@ class Node:
         
         # DEBUG_MODE: Rastgele paket bozma simülasyonu
         if DEBUG_MODE and random.random() < CORRUPTION_CHANCE:
-            print(f"\n[DEBUG] Paket bozuluyor... (Simulated Bit-flip)")
+            self.log(f"[DEBUG] Paket bozuluyor... (Simulated Bit-flip)", Fore.RED)
             packet = corrupt_data(packet)
 
         self.sock.sendto(packet, self.target_address)
-        # Chat modunda çok fazla log basmamak için log seviyesini düşürebiliriz
-        # print(f"[GÖNDER] {p_type.name} | Seq: {seq} | Payload: {len(payload)} byte")
+        
+        # Paket tipine göre renk belirle
+        color = Fore.GREEN if p_type == PacketType.DATA else Fore.YELLOW
+        if p_type == PacketType.ACK: color = Fore.BLUE
+        
+        self.log(f"[GÖNDER] {p_type.name} | Seq: {seq} | Payload: {len(payload)} byte", color)
         return seq
 
     def receive_packet(self):
@@ -56,11 +72,16 @@ class Node:
             data, addr = self.sock.recvfrom(BUFFER_SIZE)
             try:
                 p_type, seq, payload = unpack_packet(data)
-                # print(f"[ALINDI] {p_type.name} | Seq: {seq} | Kaynak: {addr}")
+                
+                # Paket tipine göre renk belirle
+                color = Fore.GREEN if p_type == PacketType.DATA else Fore.YELLOW
+                if p_type == PacketType.ACK: color = Fore.BLUE
+                
+                self.log(f"[ALINDI] {p_type.name} | Seq: {seq} | Kaynak: {addr}", color)
                 return p_type, seq, payload
             except ValueError as e:
                 if "Checksum hatası" in str(e):
-                    print(f"\n!!! Data Corrupted! (Checksum mismatch) !!!")
+                    self.log(f"!!! Data Corrupted! (Checksum mismatch) !!!", Fore.RED + Style.BRIGHT)
                 return "CORRUPTED", None, None
         except socket.timeout:
             return None, None, None
@@ -80,18 +101,18 @@ class Node:
                 p_type, seq, _ = self.receive_packet()
                 
                 if p_type == "CORRUPTED":
-                    print("Handshake sırasında bozuk paket alındı, yoksayılıyor...")
+                    self.log("Handshake sırasında bozuk paket alındı, yoksayılıyor...", Fore.RED)
                 
                 if p_type == PacketType.ACK:
                     self.send_packet(PacketType.ACK, seq=1)
                     self.state = NodeState.ESTABLISHED
                     self.seq_num = 2 
-                    print(f"Bağlantı Kuruldu (İstemci) | Durum: {self.state.name}")
+                    self.log(f"Bağlantı Kuruldu (İstemci) | Durum: {self.state.name}", Fore.MAGENTA + Style.BRIGHT)
                     return
                 
                 retries += 1
                 if retries < MAX_RETRIES:
-                    print(f"SYN-ACK gelmedi veya bozuk, tekrar deneniyor ({retries}/{MAX_RETRIES})...")
+                    self.log(f"SYN-ACK gelmedi veya bozuk, tekrar deneniyor ({retries}/{MAX_RETRIES})...", Fore.YELLOW)
             
             self.state = NodeState.ERROR
             raise ConnectionError("Bağlantı kurulamadı: Handshake Timeout veya Hata.")
@@ -100,7 +121,7 @@ class Node:
             while True:
                 p_type, seq, _ = self.receive_packet()
                 if p_type == "CORRUPTED":
-                    print("Dinlerken bozuk paket alındı, yoksayılıyor...")
+                    self.log("Dinlerken bozuk paket alındı, yoksayılıyor...", Fore.RED)
                     continue
                 if p_type == PacketType.SYN:
                     break
@@ -112,12 +133,12 @@ class Node:
             while True:
                 p_type, seq, _ = self.receive_packet()
                 if p_type == "CORRUPTED":
-                    print("Son ACK beklenirken bozuk paket alındı, yoksayılıyor...")
+                    self.log("Son ACK beklenirken bozuk paket alındı, yoksayılıyor...", Fore.RED)
                     continue
                 if p_type == PacketType.ACK:
                     self.state = NodeState.ESTABLISHED
                     self.seq_num = 1
-                    print(f"Bağlantı Kuruldu (Sunucu) | Durum: {self.state.name}")
+                    self.log(f"Bağlantı Kuruldu (Sunucu) | Durum: {self.state.name}", Fore.MAGENTA + Style.BRIGHT)
                     break
 
     def send_data(self, data: bytes):
@@ -126,7 +147,7 @@ class Node:
         Retransmission mekanizması içerir.
         """
         if self.state != NodeState.ESTABLISHED:
-            print("Hata: Bağlantı kurulmadan veri gönderilemez!")
+            self.log("Hata: Bağlantı kurulmadan veri gönderilemez!", Fore.RED)
             return
         
         current_seq = self.seq_num
@@ -136,12 +157,10 @@ class Node:
         while retries <= MAX_RETRIES:
             self.send_packet(PacketType.DATA, data, seq=current_seq)
             
-            # Chat modunda ACK beklerken diğer thread receive loop'ta olduğu için 
-            # burada kısa bir bekleme veya farklı bir mekanizma gerekebilir.
-            # Ancak bu basitleştirilmiş Stop-and-Wait ARQ için threadler arası 
-            # senkronizasyon gerekecek. Şimdilik basitleştirilmiş gönderim yapıyoruz.
-            # Gerçek ARQ için bir ACK queue kullanılabilir.
-            return # Şimdilik sadece gönderiyoruz (Chat akışı için)
+            # Chat modunda ACK beklemek için bekleme süresi
+            # (Basit Chat için ARQ burada karmaşıklık yaratabilir, 
+            # şimdilik sadece gönderiyoruz)
+            return
 
     def start_receive_thread(self):
         """
@@ -154,7 +173,7 @@ class Node:
         """
         Sürekli gelen paketleri dinleyen döngü.
         """
-        print("Dinleme döngüsü başlatıldı...")
+        self.log("Dinleme döngüsü başlatıldı...", Fore.CYAN)
         while self.running:
             p_type, seq, payload = self.receive_packet()
             
@@ -162,14 +181,15 @@ class Node:
                 continue
             
             if p_type == PacketType.DATA:
-                print(f"\n[MESAJ] Sunucu: {payload.decode()}")
+                print(f"\n{Fore.GREEN + Style.BRIGHT}[MESAJ] Sunucu: {payload.decode()}{Style.RESET_ALL}")
+                print(f"{Fore.WHITE}Siz: ", end="", flush=True)
                 # Alınan veri için ACK gönder
                 self.send_packet(PacketType.ACK, seq=seq)
             elif p_type == PacketType.ACK:
-                # print(f"[SİSTEM] Paket {seq} onaylandı.")
+                # self.log(f"Paket {seq} onaylandı.", Fore.BLUE)
                 pass
             elif p_type == PacketType.FIN:
-                print("\n[SİSTEM] Karşı taraf bağlantıyı kapattı.")
+                self.log("Karşı taraf bağlantıyı kapattı.", Fore.RED)
                 self.state = NodeState.CLOSED
                 self.running = False
 
@@ -177,4 +197,4 @@ class Node:
         self.running = False
         self.state = NodeState.CLOSED
         self.sock.close()
-        print(f"Bağlantı Kapatıldı. Durum: {self.state.name}")
+        self.log(f"Bağlantı Kapatıldı. Durum: {self.state.name}", Fore.RED)
