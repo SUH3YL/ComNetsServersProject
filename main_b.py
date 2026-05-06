@@ -10,14 +10,18 @@ def main():
         print("\n--- Baglanti Bekleniyor ---")
         node_b.establish_connection(is_initiator=False)
         
-        # 2. Mesaj Bekle
-        print("\n--- Veri Bekleniyor ---")
-        p_type, seq, payload = node_b.listen_data()
-        print(f"Sunucu B mesaj aldi: {payload.decode()}")
+        # 2. Dinleme Thread'ini Başlat
+        node_b.start_receive_thread()
         
-        # 3. Yanıt Gönder
-        response = b"Selam Sunucu A, guvenli mesajini aldim!"
-        node_b.send_data(response)
+        # 3. Chat Döngüsü
+        print("\n--- Chat Baslatildi (Cikmak icin 'exit' yazin) ---")
+        while node_b.state == NodeState.ESTABLISHED:
+            msg = input("Siz: ")
+            if msg.lower() == 'exit':
+                node_b.send_packet(PacketType.FIN)
+                break
+            if msg:
+                node_b.send_data(msg.encode())
         
     except Exception as e:
         print(f"Hata olustu: {e}")

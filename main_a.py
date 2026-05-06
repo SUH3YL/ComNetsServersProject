@@ -7,20 +7,24 @@ def main():
     
     try:
         # 1. Bağlantı Kur (Handshake Başlatıcı)
-        print("\n--- Bağlantı Kuruluyor ---")
+        print("\n--- Baglanti Kuruluyor ---")
         node_a.establish_connection(is_initiator=True)
         
-        # 2. Veri Gönder
-        print("\n--- Veri Gönderimi ---")
-        message = b"Merhaba Sunucu B, bu guvenli bir protokoldur."
-        node_a.send_data(message)
+        # 2. Dinleme Thread'ini Başlat
+        node_a.start_receive_thread()
         
-        # 3. Yanıt Bekle
-        p_type, seq, payload = node_a.listen_data()
-        print(f"Sunucu A yanit aldi: {payload.decode()}")
+        # 3. Chat Döngüsü
+        print("\n--- Chat Baslatildi (Cikmak icin 'exit' yazin) ---")
+        while node_a.state == NodeState.ESTABLISHED:
+            msg = input("Siz: ")
+            if msg.lower() == 'exit':
+                node_a.send_packet(PacketType.FIN)
+                break
+            if msg:
+                node_a.send_data(msg.encode())
         
     except Exception as e:
-        print(f"Hata oluştu: {e}")
+        print(f"Hata olustu: {e}")
     finally:
         node_a.close()
 

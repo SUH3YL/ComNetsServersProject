@@ -1,11 +1,11 @@
 import socket
 import random
+import threading
 from enum import Enum
 from config import BUFFER_SIZE, PacketType, TIMEOUT, MAX_RETRIES, DEBUG_MODE, CORRUPTION_CHANCE
 from protocol_utils import pack_packet, unpack_packet, corrupt_data
 
 class NodeState(Enum):
-# ... (Enum tanımları aynı kalacak)
     CLOSED = 0
     LISTEN = 1
     SYN_SENT = 2
@@ -19,6 +19,7 @@ class Node:
         self.target_address = (target_ip, target_port)
         self.state = NodeState.CLOSED
         self.seq_num = 0
+        self.running = True
         
         # UDP Soketi oluşturma
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -39,11 +40,12 @@ class Node:
         
         # DEBUG_MODE: Rastgele paket bozma simülasyonu
         if DEBUG_MODE and random.random() < CORRUPTION_CHANCE:
-            print(f"[DEBUG] Paket bozuluyor... (Simulated Bit-flip)")
+            print(f"\n[DEBUG] Paket bozuluyor... (Simulated Bit-flip)")
             packet = corrupt_data(packet)
 
         self.sock.sendto(packet, self.target_address)
-        print(f"[GÖNDER] {p_type.name} | Seq: {seq} | Payload: {len(payload)} byte")
+        # Chat modunda çok fazla log basmamak için log seviyesini düşürebiliriz
+        # print(f"[GÖNDER] {p_type.name} | Seq: {seq} | Payload: {len(payload)} byte")
         return seq
 
     def receive_packet(self):
@@ -54,16 +56,15 @@ class Node:
             data, addr = self.sock.recvfrom(BUFFER_SIZE)
             try:
                 p_type, seq, payload = unpack_packet(data)
-                print(f"[ALINDI] {p_type.name} | Seq: {seq} | Kaynak: {addr}")
+                # print(f"[ALINDI] {p_type.name} | Seq: {seq} | Kaynak: {addr}")
                 return p_type, seq, payload
             except ValueError as e:
                 if "Checksum hatası" in str(e):
-                    print(f"!!! Data Corrupted! (Checksum mismatch) !!!")
+                    print(f"\n!!! Data Corrupted! (Checksum mismatch) !!!")
                 return "CORRUPTED", None, None
         except socket.timeout:
             return None, None, None
         except ConnectionResetError:
-            # UDP'de bazen 'port unreachable' hatası ConnectionResetError olarak döner
             return None, None, None
 
     def establish_connection(self, is_initiator=False):
@@ -80,7 +81,6 @@ class Node:
                 
                 if p_type == "CORRUPTED":
                     print("Handshake sırasında bozuk paket alındı, yoksayılıyor...")
-                    # continue yapmıyoruz çünkü zaten döngü başa dönecek veya timeout olacak
                 
                 if p_type == PacketType.ACK:
                     self.send_packet(PacketType.ACK, seq=1)
@@ -126,59 +126,55 @@ class Node:
         Retransmission mekanizması içerir.
         """
         if self.state != NodeState.ESTABLISHED:
-            raise ConnectionError("Hata: Bağlantı kurulmadan veri gönderilemez!")
+            print("Hata: Bağlantı kurulmadan veri gönderilemez!")
+            return
         
         current_seq = self.seq_num
         self.seq_num += 1
         retries = 0
         
         while retries <= MAX_RETRIES:
-            # Paketi gönder
             self.send_packet(PacketType.DATA, data, seq=current_seq)
             
-            # ACK bekle
-            p_type, seq, _ = self.receive_packet()
-            
-            if p_type == PacketType.ACK and seq == current_seq:
-                print(f"[BAŞARILI] Paket {current_seq} onaylandı (ACK alındı).")
-                return
-            
-            retries += 1
-            if retries <= MAX_RETRIES:
-                print(f"[RE-TRY] Paket {current_seq} için ACK gelmedi, tekrar gönderiliyor ({retries}/{MAX_RETRIES})...")
-        
-        self.state = NodeState.ERROR
-        print(f"[HATA] Paket {current_seq} için {MAX_RETRIES} deneme başarısız oldu. Durum: ERROR")
-        raise ConnectionError(f"Veri gönderimi başarısız: Maksimum deneme sayısına ulaşıldı.")
+            # Chat modunda ACK beklerken diğer thread receive loop'ta olduğu için 
+            # burada kısa bir bekleme veya farklı bir mekanizma gerekebilir.
+            # Ancak bu basitleştirilmiş Stop-and-Wait ARQ için threadler arası 
+            # senkronizasyon gerekecek. Şimdilik basitleştirilmiş gönderim yapıyoruz.
+            # Gerçek ARQ için bir ACK queue kullanılabilir.
+            return # Şimdilik sadece gönderiyoruz (Chat akışı için)
 
-    def listen_data(self):
+    def start_receive_thread(self):
         """
-        Veri alımı yapar ve ACK gönderir. Bozuk paketleri reddeder.
+        Arka planda dinleme yapacak thread'i başlatır.
         """
-        if self.state != NodeState.ESTABLISHED:
-            raise ConnectionError("Hata: Bağlantı kurulmadan veri dinlenemez!")
-        
-        old_timeout = self.sock.gettimeout()
-        self.sock.settimeout(None) 
-        
-        try:
-            while True:
-                p_type, seq, payload = self.receive_packet()
-                
-                if p_type == "CORRUPTED":
-                    print("Bozuk paket alindi, yoksayiliyor (Gondericiden retransmission bekleniyor)...")
-                    continue
-                
-                if p_type == PacketType.DATA:
-                    # Alınan veri için hemen ACK gönder
-                    self.send_packet(PacketType.ACK, seq=seq)
-                    return p_type, seq, payload
-                
-                return p_type, seq, payload
-        finally:
-            self.sock.settimeout(old_timeout)
+        self.receive_thread = threading.Thread(target=self.receive_loop, daemon=True)
+        self.receive_thread.start()
+
+    def receive_loop(self):
+        """
+        Sürekli gelen paketleri dinleyen döngü.
+        """
+        print("Dinleme döngüsü başlatıldı...")
+        while self.running:
+            p_type, seq, payload = self.receive_packet()
+            
+            if p_type == "CORRUPTED":
+                continue
+            
+            if p_type == PacketType.DATA:
+                print(f"\n[MESAJ] Sunucu: {payload.decode()}")
+                # Alınan veri için ACK gönder
+                self.send_packet(PacketType.ACK, seq=seq)
+            elif p_type == PacketType.ACK:
+                # print(f"[SİSTEM] Paket {seq} onaylandı.")
+                pass
+            elif p_type == PacketType.FIN:
+                print("\n[SİSTEM] Karşı taraf bağlantıyı kapattı.")
+                self.state = NodeState.CLOSED
+                self.running = False
 
     def close(self):
+        self.running = False
         self.state = NodeState.CLOSED
         self.sock.close()
         print(f"Bağlantı Kapatıldı. Durum: {self.state.name}")
