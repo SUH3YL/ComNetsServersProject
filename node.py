@@ -1,6 +1,7 @@
 import socket
 import random
 import threading
+import queue
 from datetime import datetime
 from enum import Enum
 from colorama import init, Fore, Style
@@ -26,6 +27,11 @@ class Node:
         self.seq_num = 0
         self.running = True
         
+        # UI için log ve mesaj kuyrukları
+        self.logs = []
+        self.received_messages = queue.Queue()
+        self.debug_mode = DEBUG_MODE
+        
         # UDP Soketi oluşturma
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(self.my_address)
@@ -35,10 +41,18 @@ class Node:
 
     def log(self, message, color=Fore.WHITE):
         """
-        Zaman damgalı ve renkli log basar.
+        Zaman damgalı ve renkli log basar ve UI için saklar.
         """
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        formatted_log = f"[{timestamp}] {message}"
+        
+        # Terminale bas
         print(f"{Style.DIM}[{timestamp}]{Style.RESET_ALL} {color}{message}{Style.RESET_ALL}")
+        
+        # UI listesine ekle (Sadece son 50 logu tut)
+        self.logs.append({"time": timestamp, "msg": message, "color": color})
+        if len(self.logs) > 50:
+            self.logs.pop(0)
 
     def send_packet(self, p_type: PacketType, payload: bytes = b"", seq: int = None):
         """
@@ -51,7 +65,7 @@ class Node:
         packet = pack_packet(p_type, seq, payload)
         
         # DEBUG_MODE: Rastgele paket bozma simülasyonu
-        if DEBUG_MODE and random.random() < CORRUPTION_CHANCE:
+        if self.debug_mode and random.random() < CORRUPTION_CHANCE:
             self.log(f"[DEBUG] Paket bozuluyor... (Simulated Bit-flip)", Fore.RED)
             packet = corrupt_data(packet)
 
@@ -144,7 +158,6 @@ class Node:
     def send_data(self, data: bytes):
         """
         Sadece ESTABLISHED durumunda veri gönderimine izin verir.
-        Retransmission mekanizması içerir.
         """
         if self.state != NodeState.ESTABLISHED:
             self.log("Hata: Bağlantı kurulmadan veri gönderilemez!", Fore.RED)
@@ -152,15 +165,7 @@ class Node:
         
         current_seq = self.seq_num
         self.seq_num += 1
-        retries = 0
-        
-        while retries <= MAX_RETRIES:
-            self.send_packet(PacketType.DATA, data, seq=current_seq)
-            
-            # Chat modunda ACK beklemek için bekleme süresi
-            # (Basit Chat için ARQ burada karmaşıklık yaratabilir, 
-            # şimdilik sadece gönderiyoruz)
-            return
+        self.send_packet(PacketType.DATA, data, seq=current_seq)
 
     def start_receive_thread(self):
         """
@@ -181,12 +186,12 @@ class Node:
                 continue
             
             if p_type == PacketType.DATA:
-                print(f"\n{Fore.GREEN + Style.BRIGHT}[MESAJ] Sunucu: {payload.decode()}{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}Siz: ", end="", flush=True)
+                msg = payload.decode()
+                self.received_messages.put(msg)
+                self.log(f"Veri alındı: {msg}", Fore.GREEN)
                 # Alınan veri için ACK gönder
                 self.send_packet(PacketType.ACK, seq=seq)
             elif p_type == PacketType.ACK:
-                # self.log(f"Paket {seq} onaylandı.", Fore.BLUE)
                 pass
             elif p_type == PacketType.FIN:
                 self.log("Karşı taraf bağlantıyı kapattı.", Fore.RED)
