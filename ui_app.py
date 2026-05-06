@@ -103,7 +103,7 @@ with col2:
             
             log_html += f"<p style='color: {color}; margin: 2px 0;'>[{log['time']}] {log['msg']}</p>"
         log_html += "</div>"
-        log_container.markdown(log_html, unsafe_allow_color_allowed=True, unsafe_allow_html=True)
+        log_container.markdown(log_html, unsafe_allow_html=True)
 
 # Otomatik yenileme (Düşük performanslı ama basit bir çözüm)
 time.sleep(0.5)
