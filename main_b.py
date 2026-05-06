@@ -1,5 +1,5 @@
-from node import Node
-from config import PORT_A, PORT_B
+from node import Node, NodeState
+from config import PORT_A, PORT_B, PacketType
 
 def main():
     # Sunucu B: Kendi portu PORT_B, hedef portu PORT_A
