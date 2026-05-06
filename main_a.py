@@ -6,17 +6,21 @@ def main():
     node_a = Node("127.0.0.1", PORT_A, "127.0.0.1", PORT_B)
     
     try:
-        # Sunucu B'ye test mesajı gönder
-        message = b"Merhaba Sunucu B, ben Sunucu A!"
-        node_a.send_raw(message)
+        # 1. Bağlantı Kur (Handshake Başlatıcı)
+        print("\n--- Bağlantı Kuruluyor ---")
+        node_a.establish_connection(is_initiator=True)
         
-        # Yanıt bekle
-        print("Yanıt bekleniyor...")
-        data, addr = node_a.listen_raw()
-        print(f"Sunucu A yanıt aldı: {data.decode()}")
+        # 2. Veri Gönder
+        print("\n--- Veri Gönderimi ---")
+        message = b"Merhaba Sunucu B, bu guvenli bir protokoldur."
+        node_a.send_data(message)
         
-    except KeyboardInterrupt:
-        print("\nSunucu A durduruluyor...")
+        # 3. Yanıt Bekle
+        p_type, seq, payload = node_a.listen_data()
+        print(f"Sunucu A yanit aldi: {payload.decode()}")
+        
+    except Exception as e:
+        print(f"Hata oluştu: {e}")
     finally:
         node_a.close()
 

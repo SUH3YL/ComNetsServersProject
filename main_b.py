@@ -6,17 +6,21 @@ def main():
     node_b = Node("127.0.0.1", PORT_B, "127.0.0.1", PORT_A)
     
     try:
-        print("Sunucu B dinlemede...")
-        # Sunucu A'dan mesaj bekle
-        data, addr = node_b.listen_raw()
-        print(f"Sunucu B mesaj aldı: {data.decode()}")
+        # 1. Bağlantı Kur (Handshake Dinleyici)
+        print("\n--- Baglanti Bekleniyor ---")
+        node_b.establish_connection(is_initiator=False)
         
-        # Yanıt gönder
-        response = b"Selam Sunucu A, mesajini aldim!"
-        node_b.send_raw(response)
+        # 2. Mesaj Bekle
+        print("\n--- Veri Bekleniyor ---")
+        p_type, seq, payload = node_b.listen_data()
+        print(f"Sunucu B mesaj aldi: {payload.decode()}")
         
-    except KeyboardInterrupt:
-        print("\nSunucu B durduruluyor...")
+        # 3. Yanıt Gönder
+        response = b"Selam Sunucu A, guvenli mesajini aldim!"
+        node_b.send_data(response)
+        
+    except Exception as e:
+        print(f"Hata olustu: {e}")
     finally:
         node_b.close()
 
